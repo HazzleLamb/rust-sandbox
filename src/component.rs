@@ -1,31 +1,21 @@
+pub mod moon;
+pub mod orbit;
+pub mod planet;
+pub mod pos;
+pub mod star;
+
 use std::{
     any::{Any, TypeId},
-    default,
+    ops::Deref,
 };
 
-use nalgebra::Vector3;
+use crate::heap::{Heap, HeapElemId};
 
-use strum_macros::{AsRefStr, EnumDiscriminants, EnumIter, IntoStaticStr};
-
-#[derive(EnumIter, IntoStaticStr, AsRefStr, EnumDiscriminants)]
-#[strum_discriminants(name(ComponentType))]
-#[strum_discriminants(derive(Hash))]
-pub enum Component {
-    Pos {
-        pos: Vector3<u64>,
-    },
-    Orbit {
-        center_component: usize,
-        radius: u64,
-        period_secs: u64,
-    },
-}
-
-pub trait ComponentMarker: AToAny + Sync {
+pub trait ComponentMarker: AToAny + Sync + Send {
     fn id(&self) -> TypeId;
 }
 
-pub trait AToAny: 'static {
+pub trait AToAny {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }
@@ -44,80 +34,40 @@ pub trait Tomb {
     fn tomb() -> &'static Self;
 }
 
-#[derive(Default)]
-pub struct Pos {
-    pub pos: Vector3<u64>,
+pub struct ComponentStore {
+    store: Heap<ComponentStore, Box<dyn ComponentMarker>>,
 }
-impl Pos {
-    pub fn new(x: u64, y: u64, z: u64) -> Self {
-        Self {
-            pos: Vector3::new(x, y, z),
+impl ComponentStore {
+    pub fn new() -> Self {
+        Self { store: Heap::new() }
+    }
+
+    pub fn put<T: ComponentMarker + 'static>(
+        &mut self,
+        component: Box<T>,
+    ) -> HeapElemId<ComponentStore> {
+        let component_key = self.store.alloc();
+        self.store.replace(&component_key, component);
+
+        component_key
+    }
+
+    pub fn get_as<T: ComponentMarker + Tomb + 'static>(
+        &self,
+        component_id: &HeapElemId<ComponentStore>,
+    ) -> &T {
+        let data = self.store.get(component_id).deref().as_any();
+
+        if !data.is::<T>() {
+            let t_type_id = T::tomb().id();
+            let data_type_id = data.type_id();
+            println!(
+                "IS ERROR: data of type {:?} is actualy not {:?}",
+                data_type_id, t_type_id
+            );
+            panic!()
         }
-    }
-}
 
-impl ComponentMarker for Pos {
-    fn id(&self) -> TypeId {
-        TypeId::of::<Self>()
-    }
-}
-
-impl Tomb for Pos {
-    fn tomb() -> &'static Pos {
-        static TOMB: Pos = Pos {
-            pos: Vector3::new(0, 0, 0),
-        };
-        &TOMB
-    }
-}
-
-#[derive(Default)]
-pub enum OrbitDirection {
-    #[default]
-    CW,
-    CCW,
-}
-
-#[derive(Default)]
-pub struct OrbitComponent {
-    pub center_component: usize,
-    pub tilt: Vector3<f32>,
-    pub radius: u64,
-    pub period_secs: u64,
-    pub direction: OrbitDirection,
-}
-impl OrbitComponent {
-    pub(crate) fn new(
-        center_component: usize,
-        tilt: Vector3<f32>,
-        radius: u64,
-        period_secs: u64,
-    ) -> Self {
-        Self {
-            center_component,
-            tilt,
-            radius,
-            period_secs,
-            direction: OrbitDirection::CW,
-        }
-    }
-}
-
-impl ComponentMarker for OrbitComponent {
-    fn id(&self) -> TypeId {
-        TypeId::of::<Self>()
-    }
-}
-
-impl Tomb for OrbitComponent {
-    fn tomb() -> &'static Self {
-        static TOMB: OrbitComponent = OrbitComponent {
-            center_component: 0,
-            tilt: Vector3::new(0.0, 0.0, 0.0),
-            radius: 0,
-            period_secs: 0,
-            direction: OrbitDirection::CW,
-        };
-        &TOMB
+        data.downcast_ref::<T>().unwrap()
     }
 }

@@ -295,6 +295,7 @@ version = "0.1.0"
 dependencies = [
  "la-arena",
  "nalgebra",
+ "once_cell",
  "rand",
  "rayon",
  "strum",
