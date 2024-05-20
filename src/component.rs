@@ -9,6 +9,8 @@ use std::{
     ops::Deref,
 };
 
+use rustc_hash::FxHashMap;
+
 use crate::heap::{Heap, HeapElemId};
 
 pub trait ComponentMarker: AToAny + Sync + Send {
@@ -36,20 +38,43 @@ pub trait Tomb {
 
 pub struct ComponentStore {
     store: Heap<ComponentStore, Box<dyn ComponentMarker>>,
+    ty_lookup: FxHashMap<HeapElemId<ComponentStore>, TypeId>,
 }
 impl ComponentStore {
     pub fn new() -> Self {
-        Self { store: Heap::new() }
+        Self {
+            store: Heap::new(),
+            ty_lookup: FxHashMap::default(),
+        }
+    }
+
+    pub fn with_capacity(cap: usize) -> Self {
+        Self {
+            store: Heap::with_capacity(cap),
+            ty_lookup: FxHashMap::default(),
+        }
+    }
+
+    pub fn alloc<T: ComponentMarker + Tomb + 'static>(&mut self) -> HeapElemId<ComponentStore> {
+        let ty_id = T::tomb().id();
+        let component_key = self.store.alloc();
+        self.ty_lookup.insert(component_key, ty_id);
+
+        component_key
     }
 
     pub fn put<T: ComponentMarker + 'static>(
         &mut self,
+        component_id: &HeapElemId<ComponentStore>,
         component: Box<T>,
-    ) -> HeapElemId<ComponentStore> {
-        let component_key = self.store.alloc();
-        self.store.replace(&component_key, component);
+    ) {
+        let cell_ty_id = self.ty_lookup.get(component_id).unwrap();
+        assert!(&component.id() == cell_ty_id);
+        self.store.replace(&component_id, component);
+    }
 
-        component_key
+    pub fn get_type_id(&self, component_id: &HeapElemId<ComponentStore>) -> TypeId {
+        self.ty_lookup[component_id]
     }
 
     pub fn get_as<T: ComponentMarker + Tomb + 'static>(

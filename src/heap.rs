@@ -1,4 +1,6 @@
-use std::{collections::HashMap, hash::Hash, marker::PhantomData, mem, sync::atomic::AtomicUsize};
+use std::{hash::Hash, marker::PhantomData, mem, sync::atomic::AtomicUsize};
+
+use rustc_hash::FxHashMap;
 
 pub const fn impossible_heap_elem_id<O>() -> HeapElemId<O> {
     HeapElemId {
@@ -10,6 +12,18 @@ pub const fn impossible_heap_elem_id<O>() -> HeapElemId<O> {
 pub struct HeapElemId<O> {
     owner: PhantomData<O>,
     id: usize,
+}
+
+impl<O> PartialOrd for HeapElemId<O> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.id.partial_cmp(&other.id)
+    }
+}
+
+impl<O> Ord for HeapElemId<O> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.id.cmp(&other.id)
+    }
 }
 
 impl<O> PartialEq for HeapElemId<O> {
@@ -45,7 +59,7 @@ impl<O> Clone for HeapElemId<O> {
 
 impl<O> Copy for HeapElemId<O> {}
 
-#[derive(PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy, PartialOrd, Ord)]
 struct BucketIdx {
     idx: usize,
 }
@@ -79,15 +93,15 @@ impl<O> HeapKeyAlloc<O> {
 }
 
 struct HeapKeyLookupMap<O> {
-    bucket_to_key_map: HashMap<HeapElemId<O>, BucketIdx>,
-    key_bucket_to_map: HashMap<BucketIdx, HeapElemId<O>>,
+    bucket_to_key_map: FxHashMap<HeapElemId<O>, BucketIdx>,
+    key_bucket_to_map: FxHashMap<BucketIdx, HeapElemId<O>>,
 }
 
 impl<O> HeapKeyLookupMap<O> {
     fn new() -> Self {
         Self {
-            bucket_to_key_map: HashMap::new(),
-            key_bucket_to_map: HashMap::new(),
+            bucket_to_key_map: FxHashMap::default(),
+            key_bucket_to_map: FxHashMap::default(),
         }
     }
 
@@ -145,7 +159,6 @@ impl<O, V> Heap<O, V> {
 
         let key = self.key_allocator.new_key();
         self.lookup_map.bind(key, bucket_idx);
-
         key
     }
 
@@ -153,7 +166,7 @@ impl<O, V> Heap<O, V> {
         let bucket_idx = if let Some(bucket_idx) = self.lookup_map.bucket_idx(&key) {
             bucket_idx
         } else {
-            panic!("USE AFTER FREE: No bucket bound to key {}", key.id)
+            panic!("SEGFAULT: No bucket bound to key {}", key.id)
         };
 
         let bucket = if let Some(elem) = self.buckets.get(bucket_idx.idx) {
@@ -168,7 +181,7 @@ impl<O, V> Heap<O, V> {
         if let Some(elem) = bucket {
             elem
         } else {
-            panic!("USE AFTER FREE: bucket {} is already freed", bucket_idx.idx)
+            panic!("USE AFTER FREE: Read from empty bucket {}", bucket_idx.idx)
         }
     }
 
@@ -176,7 +189,7 @@ impl<O, V> Heap<O, V> {
         let bucket_idx = if let Some(bucket_idx) = self.lookup_map.bucket_idx(&key) {
             bucket_idx
         } else {
-            panic!("USE AFTER FREE: No bucket bound to key {}", key.id)
+            panic!("SEGFAULT: No bucket bound to key {}", key.id)
         };
 
         let bucket = if let Some(elem) = self.buckets.get_mut(bucket_idx.idx) {
@@ -188,14 +201,14 @@ impl<O, V> Heap<O, V> {
             )
         };
 
-        mem::replace(bucket, Some(value));
+        let _ = mem::replace(bucket, Some(value));
     }
 
     pub fn free(&mut self, key: &HeapElemId<O>) {
         let bucket_idx = if let Some(bucket_idx) = self.lookup_map.bucket_idx(&key) {
             bucket_idx
         } else {
-            panic!("DOUBLE FREE: No bucket bound to key {}", key.id)
+            panic!("SEGFAULT: No bucket bound to key {}", key.id)
         };
 
         let bucket = if let Some(elem) = self.buckets.get(bucket_idx.idx) {

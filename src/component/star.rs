@@ -1,14 +1,7 @@
-use std::{
-    any::TypeId,
-    sync::{Arc, Mutex},
-};
+use std::any::TypeId;
 
-use rand::rngs::ThreadRng;
-use rayon::iter::ParallelBridge;
 
-use crate::{entity::EntityStore, heap::HeapElemId, world::World};
-
-use super::{pos::StellarPos, ComponentMarker, Tomb};
+use super::{ComponentMarker, Tomb};
 
 static TOMB: Star = Star {};
 

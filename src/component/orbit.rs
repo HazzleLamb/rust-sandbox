@@ -1,6 +1,6 @@
 use std::any::TypeId;
 
-use nalgebra::{Rotation3, UnitQuaternion};
+use nalgebra::Rotation3;
 use once_cell::sync::Lazy;
 
 use crate::heap::{impossible_heap_elem_id, HeapElemId};
