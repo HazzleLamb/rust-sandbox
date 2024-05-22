@@ -1,5 +1,7 @@
 use std::any::TypeId;
 
+use crate::heap::TyId;
+
 use super::{ComponentMarker, Tomb};
 
 static TOMB: Planet = Planet {};
@@ -13,7 +15,9 @@ impl Planet {
     }
 }
 
-impl ComponentMarker for Planet {
+impl ComponentMarker for Planet {}
+
+impl TyId for Planet {
     fn id(&self) -> TypeId {
         TypeId::of::<Self>()
     }

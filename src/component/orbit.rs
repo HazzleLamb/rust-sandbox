@@ -3,7 +3,7 @@ use std::any::TypeId;
 use nalgebra::Rotation3;
 use once_cell::sync::Lazy;
 
-use crate::heap::{impossible_heap_elem_id, HeapElemId};
+use crate::heap::{impossible_heap_elem_id, HeapElemId, TyId};
 
 use super::{ComponentMarker, ComponentStore, Tomb};
 
@@ -61,7 +61,9 @@ impl SelestialOrbit {
     }
 }
 
-impl ComponentMarker for SelestialOrbit {
+impl ComponentMarker for SelestialOrbit {}
+
+impl TyId for SelestialOrbit {
     fn id(&self) -> TypeId {
         TypeId::of::<Self>()
     }

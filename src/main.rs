@@ -25,11 +25,7 @@ fn main() {
         .with_level(false)
         .init();
 
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(6)
-        .build_global()
-        .unwrap();
-    let world = Rc::new(RefCell::new(World::new()));
+    let world = Rc::new(RefCell::new(World::with_capacity(3050000, 3050000 * 5)));
 
     generate_stellar(&world);
 }

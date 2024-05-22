@@ -5,16 +5,14 @@ pub mod pos;
 pub mod star;
 
 use std::{
-    any::{Any, TypeId},
-    ops::Deref,
+    any::{Any, TypeId}, ops::Deref
 };
 
-use rustc_hash::FxHashMap;
+use ahash::AHashMap;
 
-use crate::heap::{Heap, HeapElemId};
+use crate::heap::{Heap, HeapElemId, TyId};
 
-pub trait ComponentMarker: AToAny + Sync + Send {
-    fn id(&self) -> TypeId;
+pub trait ComponentMarker: AToAny + TyId + Sync + Send {
 }
 
 pub trait AToAny {
@@ -36,22 +34,21 @@ pub trait Tomb {
     fn tomb() -> &'static Self;
 }
 
+impl TyId for Box<dyn ComponentMarker + 'static> {
+    fn id(&self) -> TypeId {
+        self.deref().id()
+    }
+}
+
 pub struct ComponentStore {
     store: Heap<ComponentStore, Box<dyn ComponentMarker>>,
-    ty_lookup: FxHashMap<HeapElemId<ComponentStore>, TypeId>,
+    ty_lookup: AHashMap<HeapElemId<ComponentStore>, TypeId>,
 }
 impl ComponentStore {
-    pub fn new() -> Self {
-        Self {
-            store: Heap::new(),
-            ty_lookup: FxHashMap::default(),
-        }
-    }
-
     pub fn with_capacity(cap: usize) -> Self {
         Self {
             store: Heap::with_capacity(cap),
-            ty_lookup: FxHashMap::default(),
+            ty_lookup: AHashMap::with_capacity(cap)
         }
     }
 
@@ -63,18 +60,27 @@ impl ComponentStore {
         component_key
     }
 
+    pub fn alloc_n<T: ComponentMarker + Tomb + 'static>(&mut self, n: usize) -> Vec<HeapElemId<ComponentStore>> {
+        let ty_id = T::tomb().id();
+        let component_ids = self.store.alloc_n(n);
+
+        for cocomponent_id in &component_ids {
+            self.ty_lookup.insert(*cocomponent_id, ty_id);
+        }
+
+        component_ids
+    }
+
     pub fn put<T: ComponentMarker + 'static>(
         &mut self,
         component_id: &HeapElemId<ComponentStore>,
         component: Box<T>,
     ) {
-        let cell_ty_id = self.ty_lookup.get(component_id).unwrap();
-        assert!(&component.id() == cell_ty_id);
         self.store.replace(&component_id, component);
     }
 
     pub fn get_type_id(&self, component_id: &HeapElemId<ComponentStore>) -> TypeId {
-        self.ty_lookup[component_id]
+        self.ty_lookup[&component_id]
     }
 
     pub fn get_as<T: ComponentMarker + Tomb + 'static>(

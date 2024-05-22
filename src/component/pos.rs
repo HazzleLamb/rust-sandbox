@@ -2,6 +2,8 @@ use std::any::TypeId;
 
 use nalgebra::Vector3;
 
+use crate::heap::TyId;
+
 use super::{ComponentMarker, Tomb};
 
 static TOMB: SelestialPos = SelestialPos {
@@ -24,7 +26,9 @@ impl SelestialPos {
     }
 }
 
-impl ComponentMarker for SelestialPos {
+impl ComponentMarker for SelestialPos {}
+
+impl TyId for SelestialPos {
     fn id(&self) -> TypeId {
         TypeId::of::<Self>()
     }

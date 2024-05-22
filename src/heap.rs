@@ -1,29 +1,21 @@
-use std::{hash::Hash, marker::PhantomData, mem, sync::atomic::AtomicUsize};
+use std::{any::TypeId, hash::Hash, marker::PhantomData, mem, sync::atomic::AtomicUsize};
 
-use rustc_hash::FxHashMap;
+use ahash::AHashSet;
+use dashmap::DashMap;
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 
 pub const fn impossible_heap_elem_id<O>() -> HeapElemId<O> {
     HeapElemId {
         owner: PhantomData,
         id: usize::MAX,
+        bucket_idx: usize::MAX,
     }
 }
 
 pub struct HeapElemId<O> {
     owner: PhantomData<O>,
     id: usize,
-}
-
-impl<O> PartialOrd for HeapElemId<O> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.id.partial_cmp(&other.id)
-    }
-}
-
-impl<O> Ord for HeapElemId<O> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.id.cmp(&other.id)
-    }
+    bucket_idx: usize,
 }
 
 impl<O> PartialEq for HeapElemId<O> {
@@ -44,6 +36,7 @@ impl<O> Default for HeapElemId<O> {
         Self {
             owner: PhantomData,
             id: Default::default(),
+            bucket_idx: Default::default(),
         }
     }
 }
@@ -53,6 +46,7 @@ impl<O> Clone for HeapElemId<O> {
         Self {
             owner: self.owner,
             id: self.id,
+            bucket_idx: self.bucket_idx,
         }
     }
 }
@@ -82,43 +76,36 @@ impl<O> HeapKeyAlloc<O> {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }
 
-    fn new_key(&mut self) -> HeapElemId<O> {
-        let next_id = self.next_id();
+    fn reserve_ids(&mut self, n: usize) -> (usize, usize) {
+        let first = self
+            .next_id
+            .fetch_add(n, std::sync::atomic::Ordering::Relaxed);
+        let last = first + n;
+
+        return (first, last);
+    }
+
+    fn n_new_keys(&mut self, buckets: &[usize]) -> Vec<HeapElemId<O>> {
+        let (first, last) = self.reserve_ids(buckets.len());
+
+        (first..last)
+            .zip(buckets.iter())
+            .map(|(id, &bucket_idx)| HeapElemId {
+                owner: self.owner,
+                id,
+                bucket_idx,
+            })
+            .collect()
+    }
+
+    fn new_key(&mut self, bucket_idx: usize) -> HeapElemId<O> {
+        let id = self.next_id();
 
         HeapElemId {
             owner: self.owner,
-            id: next_id,
+            id,
+            bucket_idx,
         }
-    }
-}
-
-struct HeapKeyLookupMap<O> {
-    bucket_to_key_map: FxHashMap<HeapElemId<O>, BucketIdx>,
-    key_bucket_to_map: FxHashMap<BucketIdx, HeapElemId<O>>,
-}
-
-impl<O> HeapKeyLookupMap<O> {
-    fn new() -> Self {
-        Self {
-            bucket_to_key_map: FxHashMap::default(),
-            key_bucket_to_map: FxHashMap::default(),
-        }
-    }
-
-    fn bind(&mut self, key: HeapElemId<O>, bucket_idx: BucketIdx) {
-        self.bucket_to_key_map.insert(key, bucket_idx);
-        self.key_bucket_to_map.insert(bucket_idx, key);
-    }
-
-    fn unbind(&mut self, key: &HeapElemId<O>) {
-        let bucket_idx = self.bucket_idx(&key).copied().unwrap();
-
-        self.bucket_to_key_map.remove(&key);
-        self.key_bucket_to_map.remove(&bucket_idx);
-    }
-
-    fn bucket_idx(&self, key: &HeapElemId<O>) -> Option<&BucketIdx> {
-        self.bucket_to_key_map.get(key)
     }
 }
 
@@ -128,7 +115,7 @@ pub struct Heap<O, V> {
 
     vacant_idxs: Vec<BucketIdx>,
     buckets: Vec<Option<V>>,
-    lookup_map: HeapKeyLookupMap<O>,
+    valid_ids: AHashSet<HeapElemId<O>>,
 }
 
 impl<O, V> Heap<O, V> {
@@ -142,7 +129,7 @@ impl<O, V> Heap<O, V> {
             key_allocator: HeapKeyAlloc::new(PhantomData),
             vacant_idxs: Vec::new(),
             buckets: Vec::with_capacity(cap),
-            lookup_map: HeapKeyLookupMap::new(),
+            valid_ids: AHashSet::with_capacity(cap),
         }
     }
 
@@ -157,74 +144,81 @@ impl<O, V> Heap<O, V> {
             new_bucket_idx
         };
 
-        let key = self.key_allocator.new_key();
-        self.lookup_map.bind(key, bucket_idx);
+        let key = self.key_allocator.new_key(bucket_idx.idx);
+        self.valid_ids.insert(key);
         key
     }
 
+    pub(crate) fn alloc_n(&mut self, n: usize) -> Vec<HeapElemId<O>> {
+        let buckets = (0..n).into_iter().map(|_| {
+            if let Some(vacant_bucket_idx) = self.vacant_idxs.pop() {
+                vacant_bucket_idx
+            } else {
+                let new_bucket_idx = BucketIdx {
+                    idx: self.buckets.len(),
+                };
+                self.buckets.push(None);
+                new_bucket_idx
+            }.idx
+        })
+        .collect::<Vec<_>>();
+
+        let keys = self.key_allocator.n_new_keys(&buckets);
+        for key in &keys {
+            self.valid_ids.insert(*key);
+        }
+
+        keys
+    }
+
     pub fn get(&self, key: &HeapElemId<O>) -> &V {
-        let bucket_idx = if let Some(bucket_idx) = self.lookup_map.bucket_idx(&key) {
-            bucket_idx
-        } else {
-            panic!("SEGFAULT: No bucket bound to key {}", key.id)
+        if !self.valid_ids.contains(&key) {
+            panic!("SEGFAULT: No bucket bound to key {}", key.id);
         };
 
-        let bucket = if let Some(elem) = self.buckets.get(bucket_idx.idx) {
+        let bucket = if let Some(elem) = self.buckets.get(key.bucket_idx) {
             elem.as_ref()
         } else {
             panic!(
                 "READ FROM UNITIALIZED: Bucket {} does not exist",
-                bucket_idx.idx
+                key.bucket_idx
             )
         };
 
         if let Some(elem) = bucket {
             elem
         } else {
-            panic!("USE AFTER FREE: Read from empty bucket {}", bucket_idx.idx)
+            panic!("USE AFTER FREE: Read from empty bucket {}", key.bucket_idx)
         }
     }
 
-    pub fn replace(&mut self, key: &HeapElemId<O>, value: V) {
-        let bucket_idx = if let Some(bucket_idx) = self.lookup_map.bucket_idx(&key) {
-            bucket_idx
-        } else {
-            panic!("SEGFAULT: No bucket bound to key {}", key.id)
+    pub fn free(&mut self, key: &HeapElemId<O>) {
+        self.valid_ids.remove(key);
+    }
+}
+
+impl<O, T: TyId> Heap<O, T> {
+    pub fn replace(&mut self, key: &HeapElemId<O>, value: T) {
+        if !self.valid_ids.contains(&key) {
+            panic!("SEGFAULT: No bucket bound to key {}", key.id);
         };
 
-        let bucket = if let Some(elem) = self.buckets.get_mut(bucket_idx.idx) {
+        let bucket = if let Some(elem) = self.buckets.get_mut(key.bucket_idx) {
             elem
         } else {
             panic!(
                 "WRITE TO UNITIALIZED: Bucket {} does not exist",
-                bucket_idx.idx
+                key.bucket_idx
             )
         };
 
+        if let Some(old_val) = bucket {
+            assert!(old_val.id() == value.id())
+        }
         let _ = mem::replace(bucket, Some(value));
     }
+}
 
-    pub fn free(&mut self, key: &HeapElemId<O>) {
-        let bucket_idx = if let Some(bucket_idx) = self.lookup_map.bucket_idx(&key) {
-            bucket_idx
-        } else {
-            panic!("SEGFAULT: No bucket bound to key {}", key.id)
-        };
-
-        let bucket = if let Some(elem) = self.buckets.get(bucket_idx.idx) {
-            elem.as_ref()
-        } else {
-            panic!(
-                "DROP OF UNITIALIZED: Bucket {} does not exist",
-                bucket_idx.idx
-            )
-        };
-
-        if bucket.is_some() {
-            self.buckets[bucket_idx.idx] = None;
-            self.lookup_map.unbind(key)
-        } else {
-            panic!("DOUBLE FREE: bucket {} is already freed", bucket_idx.idx)
-        }
-    }
+pub trait TyId {
+    fn id(&self) -> TypeId;
 }
