@@ -337,13 +337,4 @@ fn generate_moon_orbit(
     )
 }
 
-fn generate_orbiting_pos(world: &World, orbit: &SelestialOrbit) -> SelestialPos {
-    let root_pos = orbit
-        .tilt
-        .transform_vector(&Vector3::new(orbit.radius, 0.0, 0.0));
 
-    let host_pos = world.component::<SelestialPos>(&orbit.center_component);
-    let offset_pos = root_pos + host_pos.pos;
-
-    SelestialPos::load(offset_pos)
-}
