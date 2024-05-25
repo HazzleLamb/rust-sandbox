@@ -69,16 +69,10 @@ fn tick(w: &mut World) {
     // Звезды не обновляем, сразу к планетам
     for planet_data in w.planet.iter_mut() {
         if let Some(planet_data) = planet_data {
-            let host_pos = w
-                .stars
-                .get(planet_data.star_id)
-                .unwrap()
-                .as_ref()
-                .unwrap();
+            let host_pos = w.stars[planet_data.star_id].as_ref().unwrap();
 
             let radius_vector = Vector3::new(planet_data.radius, 0.0, 0.0);
-            let orbit_turn_angle =
-                (2.0 * PI) / (w.tick_number % planet_data.period_secs) as f64;
+            let orbit_turn_angle = (2.0 * PI) / (w.tick_number % planet_data.period_secs) as f64;
 
             let orbit_turn_rotation =
                 Rotation3::from_axis_angle(&Vector3::z_axis(), orbit_turn_angle);
@@ -94,12 +88,7 @@ fn tick(w: &mut World) {
     // Аналогично - луны после планет
     for moon_data in w.moon.iter_mut() {
         if let Some(moon_data) = moon_data {
-            let host_pos = w
-                .planet
-                .get(moon_data.planet_id)
-                .unwrap()
-                .as_ref()
-                .unwrap();
+            let host_pos = w.planet[moon_data.planet_id].as_ref().unwrap();
 
             let radius_vector = Vector3::new(moon_data.radius, 0.0, 0.0);
             let orbit_turn_angle = (2.0 * PI) / (w.tick_number % moon_data.period_secs) as f64;
