@@ -1,23 +1,3 @@
-[package]
-name = "rust-sandbox"
-version = "0.1.0"
-edition = "2021"
+[workspace]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
-rand = "0.8.5"
-tracing = "0.1.40"
-tracing-subscriber = "0.3.18"
-nalgebra = "0.32.5"
-rayon = "1.10.0"
-la-arena = "0.3.1"
-once_cell = "1.19.0"
-fastrand = "2.1.0"
-
-[target.x86_64-unknown-linux-gnu]
-linker = "/usr/bin/clang"
-rustflags = ["-Clink-arg=-fuse-ld=lld", "-Clink-arg=-Wl,--no-rosegment"]
-
-[profile.release]
-debug = true
+members = ["main_bin", "main_lib"]

@@ -1,0 +1,22 @@
+[package]
+name = "main_lib"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rand = "0.8.5"
+tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
+nalgebra = "0.32.5"
+rayon = "1.10.0"
+la-arena = "0.3.1"
+once_cell = "1.19.0"
+fastrand = "2.1.0"
+
+[dev-dependencies]
+criterion = "0.5.1"
+
+
+[[bench]]
+name = "ten_tick_benchmark"
+harness = false
