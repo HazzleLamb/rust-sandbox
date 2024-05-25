@@ -1,8 +1,7 @@
 use std::time::Duration;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-
-use main_lib::{generate_world, tick};
+use rust_sandbox::{generate_world, tick};
 
 pub fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("10 ticks", |b| {
