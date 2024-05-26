@@ -1,22 +1,21 @@
 use std::time::Duration;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use rust_sandbox::{generate_world, tick};
 
 pub fn criterion_benchmark(c: &mut Criterion) {
-    c.bench_function("10 ticks", |b| {
-        b.iter(|| {
-            let mut w = black_box(generate_world());
-            for _ in 0..10 {
-                tick(&mut w)
-            }
-        })
+    c.bench_function("selestial tick", |b| {
+        b.iter_batched_ref(
+            || generate_world(),
+            |w| tick(w),
+            criterion::BatchSize::LargeInput,
+        )
     });
 }
 
 criterion_group! {
   name = benches;
-  config = Criterion::default().measurement_time(Duration::from_secs(30));
+  config = Criterion::default().measurement_time(Duration::from_secs(65));
   targets = criterion_benchmark
 }
 criterion_main!(benches);
